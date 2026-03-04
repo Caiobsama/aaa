@@ -184,6 +184,10 @@ def buscar_vagas() -> Optional[list]:
                 # Extract text and clean whitespace
                 clean_cells = [cell.get_text(strip=True) for cell in cells]
 
+                # Skip header row (first column is "Cod" for headers)
+                if clean_cells[0] == "Cod":
+                    continue
+
                 # Check if this is the target discipline
                 if DISCIPLINA_ALVO in clean_cells[0]:
                     resultados.append({
