@@ -259,6 +259,20 @@ class VagasMonitor:
             enviar_telegram(msg)
             return
 
+        # Filter out invalid entries (with non-numeric vg_livres)
+        dados_validos = []
+        for d in dados:
+            try:
+                int(d["vg_livres"])
+                dados_validos.append(d)
+            except (ValueError, KeyError):
+                pass
+
+        if not dados_validos:
+            log.warning(f"Nenhuma vaga válida encontrada para {DISCIPLINA_ALVO}.")
+            return
+
+        dados = dados_validos
         texto = formatar_resultado(dados)
 
         # Check if there are available vacancies
