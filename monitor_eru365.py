@@ -1,8 +1,10 @@
 """
 Monitor de Vagas - ERU 365 (Relações Internacionais) - UFV 2026/1
 
-Verifica a cada 30 minutos se há vagas livres na disciplina ERU 365
+Verifica a cada 1 minuto se há vagas livres na disciplina ERU 365
 no site da DTI/UFV e envia notificação via Telegram.
+A cada 30 minutos, envia um resumo periódico com o total de verificações
+e vagas encontradas no período.
 
 COMO CONFIGURAR O TELEGRAM:
 1. No Telegram, procure o bot @BotFather
@@ -58,8 +60,12 @@ DISCIPLINA_ALVO = os.getenv("DISCIPLINA_ALVO", "ERU 365").strip()
 URL = "https://www.dti.ufv.br/horario/horario.asp?ano=2026&semestre=1&depto=eru"
 
 # Check interval (in seconds)
-CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "30"))
+CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "1"))
 INTERVALO_SEGUNDOS = CHECK_INTERVAL_MINUTES * 60
+
+# Periodic summary interval
+SUMMARY_INTERVAL_MINUTES = int(os.getenv("SUMMARY_INTERVAL_MINUTES", "30"))
+SUMMARY_INTERVAL_SECONDS = SUMMARY_INTERVAL_MINUTES * 60
 
 # Optional file logging
 LOG_FILE = os.getenv("LOG_FILE", "").strip()
@@ -244,6 +250,9 @@ class VagasMonitor:
 
     def __init__(self):
         self.vagas_abertas_anterior = False
+        self.total_checks = 0
+        self.checks_with_vacancies = 0
+        self.last_summary_time = time.time()
 
     def verificar(self) -> None:
         """Executes a single check."""
@@ -282,6 +291,11 @@ class VagasMonitor:
             log.error(f"Erro ao processar vagas: {e}")
             return
 
+        # Update summary counters
+        self.total_checks += 1
+        if tem_vagas:
+            self.checks_with_vacancies += 1
+
         if tem_vagas:
             log.info("🟢 VAGAS DISPONÍVEIS!")
             if not self.vagas_abertas_anterior:
@@ -307,6 +321,26 @@ class VagasMonitor:
 
         self.vagas_abertas_anterior = tem_vagas
 
+    def enviar_resumo_se_necessario(self) -> None:
+        """Sends a periodic summary via Telegram if enough time has elapsed."""
+        agora = time.time()
+        elapsed = agora - self.last_summary_time
+        if elapsed >= SUMMARY_INTERVAL_SECONDS:
+            minutos = int(elapsed / 60)
+            msg = (
+                f"📊 Resumo periódico — {DISCIPLINA_ALVO}\n"
+                f"({datetime.now().strftime('%d/%m/%Y %H:%M')})\n\n"
+                f"Últimos ~{minutos} minutos:\n"
+                f"• Verificações realizadas: {self.total_checks}\n"
+                f"• Vezes com vagas encontradas: {self.checks_with_vacancies}\n"
+                f"• Status atual: {'🟢 Vagas abertas' if self.vagas_abertas_anterior else '🔴 Sem vagas'}"
+            )
+            log.info(f"Enviando resumo periódico ({self.total_checks} checks, {self.checks_with_vacancies} com vagas)")
+            enviar_telegram(msg)
+            self.total_checks = 0
+            self.checks_with_vacancies = 0
+            self.last_summary_time = agora
+
 
 # ==============================================================
 # MAIN
@@ -318,7 +352,8 @@ def main() -> None:
     print("=" * 60)
     print(f"  Monitor de Vagas — {DISCIPLINA_ALVO}")
     print(f"  UFV 2026/1 — Departamento ERU")
-    print(f"  Verificação a cada {CHECK_INTERVAL_MINUTES} minutos")
+    print(f"  Verificação a cada {CHECK_INTERVAL_MINUTES} minuto(s)")
+    print(f"  Resumo periódico a cada {SUMMARY_INTERVAL_MINUTES} minutos")
     telegram_status = "Configurado ✅" if TELEGRAM_TOKEN else "Não configurado ❌"
     print(f"  Telegram: {telegram_status}")
     print("=" * 60)
@@ -328,13 +363,15 @@ def main() -> None:
 
     # First check immediately
     monitor.verificar()
+    monitor.enviar_resumo_se_necessario()
 
     # Main loop
     try:
         while True:
-            log.info(f"Próxima verificação em {CHECK_INTERVAL_MINUTES} minutos...")
+            log.info(f"Próxima verificação em {CHECK_INTERVAL_MINUTES} minuto(s)...")
             time.sleep(INTERVALO_SEGUNDOS)
             monitor.verificar()
+            monitor.enviar_resumo_se_necessario()
     except KeyboardInterrupt:
         log.info("Monitor finalizado pelo usuário.")
         sys.exit(0)
